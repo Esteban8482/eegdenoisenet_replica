@@ -43,8 +43,8 @@ sys.path.append('utils')
 
 from network_structure import fcNN, simple_CNN, Complex_CNN, RNN_lstm
 from data_prepare import prepare_data
-from train_method_gpu import train
-from save_method_gpu import save_eeg
+from train_method import train
+from save_method import save_eeg
 
 # ======================================================
 # 3. PARAMETROS CONFIGURABLES
@@ -53,13 +53,13 @@ DATA_DIR = './data'      # Directorio del dataset
 RESULT_DIR = './results' # Directorio de resultados
 
 # Seleccion de modelo: 'fcNN' | 'Simple_CNN' | 'Complex_CNN' | 'RNN_lstm'
-MODEL_NAME = 'Simple_CNN'
+MODEL_NAME = 'fcNN'
 
 # Tipo de artefacto: 'EOG' | 'EMG'
 NOISE_TYPE = 'EOG'
 
 # Hiperparametros
-EPOCHS = 40       # 60(fcNN), 40(CNNs), 100(RNN) para EOG
+EPOCHS = 60       # 60(fcNN), 40(CNNs), 100(RNN) para EOG
 BATCH_SIZE = 40
 COMBIN_NUM = 10   # Factor de expansion del dataset
 

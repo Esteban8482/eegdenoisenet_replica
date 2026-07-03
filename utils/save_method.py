@@ -12,7 +12,7 @@ import numpy as np
 import tensorflow as tf
 import os
 
-from train_method_gpu import test_step_vectorized
+from train_method import test_step_vectorized
 
 
 def to_numpy(data):

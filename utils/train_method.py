@@ -15,7 +15,7 @@ from tqdm import tqdm
 import os
 import math
 
-from loss_function_gpu import denoise_loss_mse
+from loss_function import denoise_loss_mse
 
 
 # ======================================================
