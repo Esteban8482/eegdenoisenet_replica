@@ -17,7 +17,6 @@ def fcNN(datanum):
   model.add(layers.Dropout(0.3))
 
   model.add(layers.Dense(datanum))
-  model.summary()
   return model
 
 def RNN_lstm(datanum):
@@ -36,7 +35,6 @@ def RNN_lstm(datanum):
   model.add(layers.Dropout(0.3))
 
   model.add(layers.Dense(datanum))
-  model.summary()
   return model
 
 def simple_CNN(datanum):
@@ -67,7 +65,6 @@ def simple_CNN(datanum):
   model.add(layers.Dense(datanum))
 
   model.build(input_shape=[ 1,datanum, 1] )
-  model.summary()
 
   return model
 
@@ -144,6 +141,5 @@ def Complex_CNN(datanum):
   model.add(layers.Dense(datanum))
 
   model.build(input_shape=[ 1,datanum, 1] )
-  model.summary()
   
   return model

@@ -24,12 +24,7 @@ from loss_function import denoise_loss_mse
 @tf.function
 def train_step_vectorized(model, noiseEEG_batch, EEG_batch, optimizer, denoise_network, datanum):
     """
-    Paso de entrenamiento vectorizado - procesa todo el batch en paralelo.
-
-    CAMBIO CLAVE: La version original iteraba muestra por muestra con un loop
-    Python (for x in range(batch_size)), lo cual hacia que la GPU procesara
-    una muestra a la vez. Esta version procesa todo el batch simultaneamente,
-    logrando paralelismo completo en los 896 CUDA cores de la GTX 1650.
+    Paso de entrenamiento vectorizado, procesa todo el batch en paralelo.
 
     Args:
         model: Instancia del modelo Keras
@@ -122,10 +117,10 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
     """
     Entrena el modelo de denoising EEG usando GPU.
 
-    CAMBIOS PRINCIPALES:
+    CAMBIOS
     - Usa tf.data.Dataset para pipeline eficiente CPU→GPU
     - train_step vectorizado procesa batches completos en paralelo
-    - Monitoreo de memoria GPU cada epoch (util para GTX 1650 4GB)
+    - Monitoreo de memoria GPU cada epoch
     - test_step con @tf.function para validacion rapida
 
     Args:
@@ -174,17 +169,16 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
     # tf.data.Dataset maneja automaticamente:
     # - Prefetching de batches (carga el siguiente batch mientras GPU entrena)
     # - Transferencia asincrona CPU→GPU
-    # - Mejor utilizacion de la GTX 1650
     print(f"[GPU] Creando pipeline tf.data.Dataset (batch_size={batch_size})...")
 
     dataset = tf.data.Dataset.from_tensor_slices((noiseEEG, EEG))
     dataset = dataset.shuffle(buffer_size=10000, reshuffle_each_iteration=True)
-    dataset = dataset.batch(batch_size, drop_remainder=False)
+    dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
     # Dataset de validacion (sin shuffle)
     val_dataset = tf.data.Dataset.from_tensor_slices((noiseEEG_val, EEG_val))
-    val_dataset = val_dataset.batch(batch_size, drop_remainder=False)
+    val_dataset = val_dataset.batch(batch_size, drop_remainder=True)
     val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
 
     # --- 3.4 Bucle de entrenamiento ---
@@ -257,13 +251,20 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
               f'Train MSE: {avg_train_loss:.6f} | Val MSE: {avg_val_loss:.6f} | '
               f'Grads: {avg_grads:.6f}')
 
-        # Monitoreo de memoria GPU (util para GTX 1650 4GB)
-        if tf.config.list_physical_devices('GPU'):
-            mem_info = tf.config.experimental.get_memory_info('GPU:0')
-            current_mb = mem_info.get('current', 0) / (1024**2)
-            peak_mb = mem_info.get('peak', 0) / (1024**2)
-            print(f'  [GPU VRAM] Actual: {current_mb:.0f}MB | Pico: {peak_mb:.0f}MB')
-
+        # Monitoreo de memoria GPU
+        try:
+            if tf.config.list_physical_devices('GPU'):
+                try:
+                    mem_info = tf.config.experimental.get_memory_info('GPU:0')
+                    current_mb = mem_info.get('current', 0) / (1024**2)
+                    peak_mb = mem_info.get('peak', 0) / (1024**2)
+                    print(f'  [GPU VRAM] Actual: {current_mb:.0f}MB | Pico: {peak_mb:.0f}MB')
+                except (AttributeError, ValueError):
+                    # Fallback para versiones de TF que no soportan get_memory_info
+                    pass
+        except Exception:
+            pass
+        
         # Guardar historial
         history['loss']['train_mse'].append(avg_train_loss)
         history['loss']['val_mse'].append(avg_val_loss)
