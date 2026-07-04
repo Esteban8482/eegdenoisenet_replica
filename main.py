@@ -115,9 +115,9 @@ EEG_test_tf = tf.convert_to_tensor(EEG_test, dtype=tf.float32)
 print(f"[OK] Datos transferidos a dispositivo: {noiseEEG_train_tf.device}")
 
 # Calcular memoria GPU usada por datos
-mem_train = noiseEEG_train_tf.nbytes + EEG_train_tf.nbytes
-mem_val = noiseEEG_val_tf.nbytes + EEG_val_tf.nbytes
-mem_test = noiseEEG_test_tf.nbytes + EEG_test_tf.nbytes
+mem_train = noiseEEG_train_tf.numpy().nbytes + EEG_train_tf.numpy().nbytes
+mem_val = noiseEEG_val_tf.numpy().nbytes + EEG_val_tf.numpy().nbytes
+mem_test = noiseEEG_test_tf.nbytes + EEG_test_tf.numpy().nbytes
 mem_total_mb = (mem_train + mem_val + mem_test) / (1024**2)
 print(f"[INFO] Memoria GPU usada por datos: {mem_total_mb:.2f} MB")
 
