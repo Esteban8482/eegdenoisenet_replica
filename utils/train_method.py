@@ -6,6 +6,7 @@ import math
 
 from loss_function import denoise_loss_mse
 
+
 # ======================================================
 # 1. TRAIN_STEP VECTORIZADO MATEMATICAMENTE EQUIVALENTE
 # ======================================================
@@ -32,7 +33,7 @@ def train_step(model, noiseEEG_batch, EEG_batch, optimizer, denoise_network, dat
     else:
         noiseEEG_batch_r = tf.reshape(noiseEEG_batch, [-1, datanum, 1])
 
-    EEG_batch_r = tf.reshape(EEG_batch, [-1, datanum, 1])
+    EEG_batch_r = tf.cast(tf.reshape(EEG_batch, [-1, datanum, 1]), tf.float32)
 
     with tf.GradientTape() as loss_tape:
         # Forward pass: batch completo en GPU
@@ -179,11 +180,11 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
 
         # Preparar datos de validacion (reshape segun tipo de red)
         if denoise_network == 'fcNN':
-            noiseEEG_val_r = noiseEEG_val
-            EEG_val_r = tf.reshape(EEG_val, [-1, datanum, 1])
+            noiseEEG_val_r = tf.cast(noiseEEG_val, tf.float32)
+            EEG_val_r = tf.cast(tf.reshape(EEG_val, [-1, datanum, 1]), tf.float32)
         else:
-            noiseEEG_val_r = tf.reshape(noiseEEG_val, [-1, datanum, 1])
-            EEG_val_r = tf.reshape(EEG_val, [-1, datanum, 1])
+            noiseEEG_val_r = tf.cast(tf.reshape(noiseEEG_val, [-1, datanum, 1]), tf.float32)
+            EEG_val_r = tf.cast(tf.reshape(EEG_val, [-1, datanum, 1]), tf.float32)
 
         denoiseoutput, val_mse = test_step(model, noiseEEG_val_r, EEG_val_r)
 

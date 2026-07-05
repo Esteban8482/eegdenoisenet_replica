@@ -115,6 +115,13 @@ print(f'[OK] EEG: {EEG_all.shape}, Ruido: {noise_all.shape}')
 
 print(f'[OK] Train: {noiseEEG_train.shape}, Val: {noiseEEG_val.shape}, Test: {noiseEEG_test.shape}')
 
+noiseEEG_train = noiseEEG_train.astype(np.float32)
+EEG_train = EEG_train.astype(np.float32)
+noiseEEG_val = noiseEEG_val.astype(np.float32)
+EEG_val = EEG_val.astype(np.float32)
+noiseEEG_test = noiseEEG_test.astype(np.float32)
+EEG_test = EEG_test.astype(np.float32)
+
 # ======================================================
 # 7. CREACION DEL MODELO
 # ======================================================

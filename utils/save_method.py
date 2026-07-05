@@ -37,6 +37,9 @@ def _reshape_for_model(noiseEEG, EEG, denoise_network, datanum):
     Returns:
         tuple: (noiseEEG_reshaped, EEG_reshaped)
     """
+    noiseEEG = tf.cast(noiseEEG, tf.float32)
+    EEG = tf.cast(EEG, tf.float32)
+    
     if denoise_network == 'fcNN':
         # fcNN: entrada 2D [batch, datanum]
         noiseEEG_r = noiseEEG
@@ -90,7 +93,6 @@ def save_eeg(saved_model, result_location, foldername,
             saved_model, noiseEEG_train_r, EEG_train_r
         )
 
-        # Convertir a numpy antes de guardar
         np.save(os.path.join(output_dir, "noiseinput_train.npy"),
                 to_numpy(noiseEEG_train))
         np.save(os.path.join(output_dir, "Denoiseoutput_train.npy"),
