@@ -1,14 +1,3 @@
-"""
-Metodos de entrenamiento para EEGdenoiseNet - Version GPU Optimizada
-=====================================================================
-1. TRAIN_STEP VECTORIZADO: Elimina el loop Python muestra-por-muestra
-   - Procesa todo el batch en paralelo en GPU
-2. Pipeline tf.data.Dataset para transferencia asincrona CPU→GPU
-3. @tf.function con input_signature para grafo optimizado
-4. test_step vectorizado con @tf.function
-5. Monitoreo de memoria GPU en cada epoch
-"""
-
 import tensorflow as tf
 import time
 from tqdm import tqdm
@@ -17,14 +6,15 @@ import math
 
 from loss_function import denoise_loss_mse
 
-
 # ======================================================
-# 1. TRAIN_STEP VECTORIZADO (PROCESA BATCH COMPLETO)
+# 1. TRAIN_STEP VECTORIZADO
 # ======================================================
 @tf.function
-def train_step_vectorized(model, noiseEEG_batch, EEG_batch, optimizer, denoise_network, datanum):
+def train_step(model, noiseEEG_batch, EEG_batch, optimizer, denoise_network, datanum):
     """
-    Paso de entrenamiento vectorizado, procesa todo el batch en paralelo.
+    Paso de entrenamiento 
+    El procesamiento vectorizado preserva la semantica exacta
+    de la funcion de perdida del original, mientras aprovecha la GPU.
 
     Args:
         model: Instancia del modelo Keras
@@ -36,9 +26,9 @@ def train_step_vectorized(model, noiseEEG_batch, EEG_batch, optimizer, denoise_n
 
     Returns:
         M_loss: Perdida promedio del batch (scalar tensor)
-        mse_grads_norm: Norma L2 del gradiente (scalar tensor)
+        mse_grads[0]: Primer gradiente (igual que el original)
     """
-    # Reshape segun el tipo de red neuronal
+    # Reshape segun el tipo de red neuronal (igual que original)
     if denoise_network == 'fcNN':
         noiseEEG_batch_r = tf.reshape(noiseEEG_batch, [-1, datanum])
     else:
@@ -46,91 +36,69 @@ def train_step_vectorized(model, noiseEEG_batch, EEG_batch, optimizer, denoise_n
 
     EEG_batch_r = tf.reshape(EEG_batch, [-1, datanum, 1])
 
-    with tf.GradientTape() as tape:
-        # Forward pass: procesa TODO el batch en una sola llamada
+    with tf.GradientTape() as loss_tape:
+        # Forward pass: batch completo en GPU
+        # training=True es implicito en el original (model.__call__ default en train_step)
         denoiseoutput = model(noiseEEG_batch_r, training=True)
         denoiseoutput = tf.reshape(denoiseoutput, [-1, datanum, 1])
 
-        # Perdida: calcula MSE para todo el batch simultaneamente
+        # Perdida MSE sobre el batch completo
+        # MSE(batch) == mean(MSE(muestra_i)) por linealidad del promedio
         M_loss = denoise_loss_mse(denoiseoutput, EEG_batch_r)
 
-    # Backpropagation
-    mse_grads = tape.gradient(M_loss, model.trainable_variables)
+    # Backpropagation (igual que original)
+    mse_grads = loss_tape.gradient(M_loss, model.trainable_variables)
     optimizer.apply_gradients(zip(mse_grads, model.trainable_variables))
 
-    # Norma del gradiente para monitoreo
-    mse_grads_norm = tf.reduce_mean(tf.sqrt(
-        tf.reduce_sum([tf.reduce_sum(tf.square(g)) for g in mse_grads])
-    ))
-
-    return M_loss, mse_grads_norm
-
+    # Retornar solo el primer gradiente (igual que el original)
+    return M_loss, mse_grads[0]
 
 # ======================================================
-# 2. TEST_STEP VECTORIZADO CON @tf.function
+# 2. TEST_STEP
 # ======================================================
-@tf.function
-def test_step_vectorized(model, noiseEEG_test, EEG_test, denoise_network, datanum):
+def test_step(model, noiseEEG_test, EEG_test):
     """
-    Paso de validacion/prueba vectorizado con @tf.function para GPU.
+    Paso de validacion/prueba - VERSION FIEL AL ORIGINAL
 
-    CAMBIO: La version original no usaba @tf.function, por lo que cada
-    llamada a test_step se ejecutaba en modo eager (lento). Ahora se
-    compila a grafo para maxima velocidad en GPU.
+    El original NO usa @tf.function en test_step.
+    Esto significa que se ejecuta en modo eager.
+
+    El original tampoco hace reshape aqui - lo hace el caller antes de llamar.
+    Sin embargo, en la practica, test_step recibe los datos ya en la forma
+    correcta (dependiendo del tipo de red).
 
     Args:
         model: Instancia del modelo Keras
-        noiseEEG_test: Datos de test con ruido
-        EEG_test: Datos de test limpios
-        denoise_network: String con el nombre del modelo
-        datanum: Numero de puntos de muestra
+        noiseEEG_test: Datos de test/validacion con ruido
+        EEG_test: Datos de test/validacion limpios
 
     Returns:
-        denoiseoutput: Senal denoised
+        denoiseoutput_test: Senal denoised
         loss: Valor de perdida MSE
     """
-    # Reshape segun el tipo de red
-    if denoise_network == 'fcNN':
-        noiseEEG_test_r = tf.reshape(noiseEEG_test, [-1, datanum])
-    else:
-        noiseEEG_test_r = tf.reshape(noiseEEG_test, [-1, datanum, 1])
+    denoiseoutput_test = model(noiseEEG_test, training=False)
+    loss = denoise_loss_mse(EEG_test, denoiseoutput_test)
 
-    EEG_test_r = tf.reshape(EEG_test, [-1, datanum, 1])
-
-    # Forward pass
-    denoiseoutput = model(noiseEEG_test_r, training=False)
-    denoiseoutput = tf.reshape(denoiseoutput, [-1, datanum, 1])
-
-    # Perdida
-    loss = denoise_loss_mse(denoiseoutput, EEG_test_r)
-
-    return denoiseoutput, loss
-
+    return denoiseoutput_test, loss
 
 # ======================================================
-# 3. FUNCION DE ENTRENAMIENTO PRINCIPAL
+# 3. FUNCION DE ENTRENAMIENTO
 # ======================================================
 def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
           noiseEEG_test, EEG_test,
           epochs, batch_size, optimizer, denoise_network,
           result_location, foldername, train_num):
     """
-    Entrena el modelo de denoising EEG usando GPU.
-
-    CAMBIOS
-    - Usa tf.data.Dataset para pipeline eficiente CPU→GPU
-    - train_step vectorizado procesa batches completos en paralelo
-    - Monitoreo de memoria GPU cada epoch
-    - test_step con @tf.function para validacion rapida
-
+    Entrena el modelo de denoising EEG 
+    
     Args:
         model: Modelo Keras a entrenar
-        noiseEEG: Tensor de entrenamiento con ruido [N, datanum]
-        EEG: Tensor de entrenamiento limpio [N, datanum]
-        noiseEEG_val: Tensor de validacion con ruido
-        EEG_val: Tensor de validacion limpio
-        noiseEEG_test: Tensor de test con ruido
-        EEG_test: Tensor de test limpio
+        noiseEEG: Tensor/array de entrenamiento con ruido [N, datanum]
+        EEG: Tensor/array de entrenamiento limpio [N, datanum]
+        noiseEEG_val: Tensor/array de validacion con ruido
+        EEG_val: Tensor/array de validacion limpio
+        noiseEEG_test: Tensor/array de test con ruido
+        EEG_test: Tensor/array de test limpio
         epochs: Numero de epocas
         batch_size: Tamano de batch
         optimizer: Optimizador de TensorFlow
@@ -145,136 +113,112 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
     """
 
     # --- 3.1 Inicializar historial ---
-    history = {
-        'grads': {'mse': []},
-        'loss': {
-            'train_mse': [],
-            'val_mse': [],
-            'test_mse': []
-        }
-    }
-    val_mse_min = 100.0
+    history = {}
+    history['grads'], history['loss'] = {}, {}
+    train_mse_history, val_mse_history = [], []
+    mse_grads_history = []
+    val_mse_min = 100.0  # cualquier numero mayor que 1 
     saved_model = None
     datanum = noiseEEG.shape[1]
 
-    # --- 3.2 Crear directorios para logs ---
-    train_log_dir = os.path.join(result_location, foldername, train_num, 'train')
-    val_log_dir = os.path.join(result_location, foldername, train_num, 'test')
+    # --- 3.2 Crear directorios para TensorBoard ---
+    train_log_dir = result_location + '/' + foldername + '/' + train_num + '/train'
+    val_log_dir = result_location + '/' + foldername + '/' + train_num + '/test'
     os.makedirs(train_log_dir, exist_ok=True)
     os.makedirs(val_log_dir, exist_ok=True)
     train_summary_writer = tf.summary.create_file_writer(train_log_dir)
     val_summary_writer = tf.summary.create_file_writer(val_log_dir)
 
-    # --- 3.3 Crear tf.data.Dataset (pipeline eficiente) ---
-    # tf.data.Dataset maneja automaticamente:
-    # - Prefetching de batches (carga el siguiente batch mientras GPU entrena)
-    # - Transferencia asincrona CPU→GPU
-    print(f"[GPU] Creando pipeline tf.data.Dataset (batch_size={batch_size})...")
+    # --- 3.3 Calcular numero de batches  ---
+    # El original usa math.ceil para incluir el ultimo batch parcial
+    batch_num = math.ceil(noiseEEG.shape[0] / batch_size)
+
+    # --- 3.4 Crear tf.data.Dataset (EFICIENTE pero con drop_remainder=False) ---
+    # drop_remainder=False preserva el ultimo batch parcial 
+    print(f"[GPU] Pipeline tf.data.Dataset (batch_size={batch_size}, drop_remainder=False)...")
 
     dataset = tf.data.Dataset.from_tensor_slices((noiseEEG, EEG))
-    dataset = dataset.shuffle(buffer_size=10000, reshuffle_each_iteration=True)
-    dataset = dataset.batch(batch_size, drop_remainder=True)
+    dataset = dataset.shuffle(buffer_size=noiseEEG.shape[0], reshuffle_each_iteration=True)
+    dataset = dataset.batch(batch_size, drop_remainder=False)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
-    # Dataset de validacion (sin shuffle)
-    val_dataset = tf.data.Dataset.from_tensor_slices((noiseEEG_val, EEG_val))
-    val_dataset = val_dataset.batch(batch_size, drop_remainder=True)
-    val_dataset = val_dataset.prefetch(tf.data.AUTOTUNE)
-
-    # --- 3.4 Bucle de entrenamiento ---
+    # --- 3.5 Bucle de entrenamiento ---
     for epoch in range(epochs):
-        start_time = time.time()
+        start = time.time()
 
-        # Inicializar metricas de la epoca
-        epoch_loss = 0.0
-        epoch_grads = 0.0
-        num_batches = 0
+        # Inicializar metricas de la epoca (igual que original)
+        mse_grads_epoch, train_mse = 0, 0
 
-        # Barra de progreso
-        total_batches = tf.math.ceil(tf.cast(noiseEEG.shape[0], tf.float32) / batch_size)
-        total_batches_int = int(total_batches.numpy())
-
-        with tqdm(total=total_batches_int, position=0, leave=True,
-                  desc=f'Epoca {epoch+1}/{epochs}') as pbar:
-
+        with tqdm(total=batch_num, position=0, leave=True) as pbar:
             for noiseEEG_batch, EEG_batch in dataset:
-                # Train step vectorizado (todo el batch en GPU)
-                loss_batch, grads_batch = train_step_vectorized(
+                # Train step (vectorizado pero equivalente)
+                mse_loss_batch, mse_grads_batch = train_step(
                     model, noiseEEG_batch, EEG_batch,
                     optimizer, denoise_network, datanum
                 )
 
-                # Acumular metricas
-                epoch_loss += float(loss_batch)
-                epoch_grads += float(grads_batch)
-                num_batches += 1
+                # Convertir a formato usable (igual que original)
+                mse_grads_batch = tf.reduce_mean(
+                    tf.sqrt(tf.reduce_sum(tf.square(mse_grads_batch)))
+                ).numpy()
+                mse_loss_batch = tf.reduce_mean(mse_loss_batch).numpy()
 
-                pbar.update(1)
-                pbar.set_postfix({'loss': f'{float(loss_batch):.6f}'})
+                # Acumular metricas (promedio sobre batch_num)
+                train_mse += mse_loss_batch / float(batch_num)
+                mse_grads_epoch += mse_grads_batch / float(batch_num)
 
-        # Promediar metricas
-        avg_train_loss = epoch_loss / num_batches
-        avg_grads = epoch_grads / num_batches
+                pbar.update()
+            pbar.close()
 
-        # --- 3.5 Validacion ---
-        val_loss_total = 0.0
-        val_batches = 0
+        # --- 3.6 Guardar historial de entrenamiento ---
+        mse_grads_history.append(mse_grads_epoch)
+        train_mse_history.append(train_mse)
 
-        for noiseEEG_val_batch, EEG_val_batch in val_dataset:
-            _, val_loss_batch = test_step_vectorized(
-                model, noiseEEG_val_batch, EEG_val_batch,
-                denoise_network, datanum
-            )
-            val_loss_total += float(val_loss_batch)
-            val_batches += 1
-
-        avg_val_loss = val_loss_total / val_batches
-
-        # --- 3.6 Guardar en TensorBoard ---
         with train_summary_writer.as_default():
-            tf.summary.scalar('loss', avg_train_loss, step=epoch)
-        with val_summary_writer.as_default():
-            tf.summary.scalar('loss', avg_val_loss, step=epoch)
+            tf.summary.scalar('loss', train_mse, step=epoch)
 
-        # --- 3.7 Guardar mejor modelo (ultimas 20% epocas) ---
-        if epoch > epochs * 0.8 and avg_val_loss < val_mse_min:
-            val_mse_min = avg_val_loss
+        # --- 3.7 Validacion sobre dataset COMPLETO  ---
+
+        # Preparar datos de validacion (reshape segun tipo de red)
+        if denoise_network == 'fcNN':
+            noiseEEG_val_r = noiseEEG_val
+            EEG_val_r = tf.reshape(EEG_val, [-1, datanum, 1])
+        else:
+            noiseEEG_val_r = tf.reshape(noiseEEG_val, [-1, datanum, 1])
+            EEG_val_r = tf.reshape(EEG_val, [-1, datanum, 1])
+
+        denoiseoutput, val_mse = test_step(model, noiseEEG_val_r, EEG_val_r)
+
+        # Guardar historial de validacion
+        val_mse_history.append(val_mse)
+
+        with val_summary_writer.as_default():
+            tf.summary.scalar('loss', val_mse, step=epoch)
+
+        # --- 3.8 Guardar mejor modelo  ---
+        if epoch > epochs * 0.8 and float(val_mse) < val_mse_min:
+            print('yes,smaller ', float(val_mse), val_mse_min)
+            val_mse_min = float(val_mse)
             saved_model = model
 
             path = os.path.join(result_location, foldername, train_num, "denoise_model")
             tf.keras.models.save_model(model, path)
-            print(f'\n  [GUARDADO] Mejor modelo: val_loss={avg_val_loss:.6f}')
+            print('Best model has been saved')
 
-        # --- 3.8 Reporte de epoca ---
-        elapsed = time.time() - start_time
-        print(f'Epoca {epoch+1}/{epochs} | Tiempo: {elapsed:.1f}s | '
-              f'Train MSE: {avg_train_loss:.6f} | Val MSE: {avg_val_loss:.6f} | '
-              f'Grads: {avg_grads:.6f}')
+        # --- 3.9 Reporte de epoca  ---
+        print('Epoch #: {}/{}, Time taken: {} secs,\\n Grads: mse= {},\\n Losses: train_mse= {}, val_mse={}'
+              .format(epoch + 1, epochs, time.time() - start, mse_grads_epoch, train_mse, val_mse))
 
-        # Monitoreo de memoria GPU
-        try:
-            if tf.config.list_physical_devices('GPU'):
-                try:
-                    mem_info = tf.config.experimental.get_memory_info('GPU:0')
-                    current_mb = mem_info.get('current', 0) / (1024**2)
-                    peak_mb = mem_info.get('peak', 0) / (1024**2)
-                    print(f'  [GPU VRAM] Actual: {current_mb:.0f}MB | Pico: {peak_mb:.0f}MB')
-                except (AttributeError, ValueError):
-                    # Fallback para versiones de TF que no soportan get_memory_info
-                    pass
-        except Exception:
-            pass
-        
-        # Guardar historial
-        history['loss']['train_mse'].append(avg_train_loss)
-        history['loss']['val_mse'].append(avg_val_loss)
-        history['grads']['mse'].append(avg_grads)
+    # --- 3.10 Finalizar---
+    try:
+        from IPython.display import clear_output
+        clear_output(wait=True)
+    except ImportError:
+        pass
 
-    # --- 3.9 Guardar modelo final si no se guardo uno mejor ---
-    if saved_model is None:
-        saved_model = model
-        path = os.path.join(result_location, foldername, train_num, "denoise_model")
-        tf.keras.models.save_model(model, path)
-        print('\n[OK] Modelo final guardado')
+    # Guardar historial en diccionario
+    history['grads']['mse'] = mse_grads_history
+    history['loss']['train_mse'] = train_mse_history
+    history['loss']['val_mse'] = val_mse_history
 
     return saved_model, history
