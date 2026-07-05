@@ -41,13 +41,10 @@ def _reshape_for_model(noiseEEG, EEG, denoise_network, datanum):
     EEG = tf.cast(EEG, tf.float32)
     
     if denoise_network == 'fcNN':
-        # fcNN: entrada 2D [batch, datanum]
         noiseEEG_r = noiseEEG
-        EEG_r = tf.reshape(EEG, [-1, datanum, 1])
     else:
-        # CNN/RNN: entrada 3D [batch, datanum, 1]
         noiseEEG_r = tf.reshape(noiseEEG, [-1, datanum, 1])
-        EEG_r = tf.reshape(EEG, [-1, datanum, 1])
+    EEG_r = EEG
 
     return noiseEEG_r, EEG_r
 

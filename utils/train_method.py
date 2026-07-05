@@ -181,10 +181,9 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
         # Preparar datos de validacion (reshape segun tipo de red)
         if denoise_network == 'fcNN':
             noiseEEG_val_r = tf.cast(noiseEEG_val, tf.float32)
-            EEG_val_r = tf.cast(tf.reshape(EEG_val, [-1, datanum, 1]), tf.float32)
         else:
             noiseEEG_val_r = tf.cast(tf.reshape(noiseEEG_val, [-1, datanum, 1]), tf.float32)
-            EEG_val_r = tf.cast(tf.reshape(EEG_val, [-1, datanum, 1]), tf.float32)
+            EEG_val_r = tf.cast(EEG_val, tf.float32)
 
         denoiseoutput, val_mse = test_step(model, noiseEEG_val_r, EEG_val_r)
 
