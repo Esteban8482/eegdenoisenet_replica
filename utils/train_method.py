@@ -7,14 +7,12 @@ import math
 from loss_function import denoise_loss_mse
 
 # ======================================================
-# 1. TRAIN_STEP VECTORIZADO
+# 1. TRAIN_STEP VECTORIZADO MATEMATICAMENTE EQUIVALENTE
 # ======================================================
 @tf.function
 def train_step(model, noiseEEG_batch, EEG_batch, optimizer, denoise_network, datanum):
     """
-    Paso de entrenamiento 
-    El procesamiento vectorizado preserva la semantica exacta
-    de la funcion de perdida del original, mientras aprovecha la GPU.
+    Paso de entrenamiento vectorizado.
 
     Args:
         model: Instancia del modelo Keras
@@ -26,9 +24,9 @@ def train_step(model, noiseEEG_batch, EEG_batch, optimizer, denoise_network, dat
 
     Returns:
         M_loss: Perdida promedio del batch (scalar tensor)
-        mse_grads[0]: Primer gradiente (igual que el original)
+        mse_grads[0]: Primer gradiente
     """
-    # Reshape segun el tipo de red neuronal (igual que original)
+    # Reshape segun el tipo de red neuronal
     if denoise_network == 'fcNN':
         noiseEEG_batch_r = tf.reshape(noiseEEG_batch, [-1, datanum])
     else:
@@ -38,7 +36,6 @@ def train_step(model, noiseEEG_batch, EEG_batch, optimizer, denoise_network, dat
 
     with tf.GradientTape() as loss_tape:
         # Forward pass: batch completo en GPU
-        # training=True es implicito en el original (model.__call__ default en train_step)
         denoiseoutput = model(noiseEEG_batch_r, training=True)
         denoiseoutput = tf.reshape(denoiseoutput, [-1, datanum, 1])
 
@@ -46,26 +43,20 @@ def train_step(model, noiseEEG_batch, EEG_batch, optimizer, denoise_network, dat
         # MSE(batch) == mean(MSE(muestra_i)) por linealidad del promedio
         M_loss = denoise_loss_mse(denoiseoutput, EEG_batch_r)
 
-    # Backpropagation (igual que original)
+    # Backpropagation
     mse_grads = loss_tape.gradient(M_loss, model.trainable_variables)
     optimizer.apply_gradients(zip(mse_grads, model.trainable_variables))
 
-    # Retornar solo el primer gradiente (igual que el original)
+    # Retornar solo el primer gradiente
     return M_loss, mse_grads[0]
 
+
 # ======================================================
-# 2. TEST_STEP
+# 2. TEST_STEP SIN @tf.function 
 # ======================================================
 def test_step(model, noiseEEG_test, EEG_test):
     """
-    Paso de validacion/prueba - VERSION FIEL AL ORIGINAL
-
-    El original NO usa @tf.function en test_step.
-    Esto significa que se ejecuta en modo eager.
-
-    El original tampoco hace reshape aqui - lo hace el caller antes de llamar.
-    Sin embargo, en la practica, test_step recibe los datos ya en la forma
-    correcta (dependiendo del tipo de red).
+    Paso de validacion/prueba
 
     Args:
         model: Instancia del modelo Keras
@@ -81,6 +72,7 @@ def test_step(model, noiseEEG_test, EEG_test):
 
     return denoiseoutput_test, loss
 
+
 # ======================================================
 # 3. FUNCION DE ENTRENAMIENTO
 # ======================================================
@@ -89,8 +81,14 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
           epochs, batch_size, optimizer, denoise_network,
           result_location, foldername, train_num):
     """
-    Entrena el modelo de denoising EEG 
-    
+    Entrena el modelo de denoising EEG
+
+    Combina eficiencia GPU con fidelidad metodologica:
+    - tf.data.Dataset para pipeline eficiente (con drop_remainder=False)
+    - Validacion sobre dataset completo
+    - test_step sin @tf.function
+    - train_step vectorizado pero matematicamente equivalente
+
     Args:
         model: Modelo Keras a entrenar
         noiseEEG: Tensor/array de entrenamiento con ruido [N, datanum]
@@ -112,7 +110,7 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
         history: Diccionario con historial de entrenamiento
     """
 
-    # --- 3.1 Inicializar historial ---
+    # --- 3.1 Inicializar historial  ---
     history = {}
     history['grads'], history['loss'] = {}, {}
     train_mse_history, val_mse_history = [], []
@@ -134,7 +132,7 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
     batch_num = math.ceil(noiseEEG.shape[0] / batch_size)
 
     # --- 3.4 Crear tf.data.Dataset (EFICIENTE pero con drop_remainder=False) ---
-    # drop_remainder=False preserva el ultimo batch parcial 
+    # drop_remainder=False preserva el ultimo batch parcial
     print(f"[GPU] Pipeline tf.data.Dataset (batch_size={batch_size}, drop_remainder=False)...")
 
     dataset = tf.data.Dataset.from_tensor_slices((noiseEEG, EEG))
@@ -146,7 +144,7 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
     for epoch in range(epochs):
         start = time.time()
 
-        # Inicializar metricas de la epoca (igual que original)
+        # Inicializar metricas de la epoca
         mse_grads_epoch, train_mse = 0, 0
 
         with tqdm(total=batch_num, position=0, leave=True) as pbar:
@@ -157,7 +155,7 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
                     optimizer, denoise_network, datanum
                 )
 
-                # Convertir a formato usable (igual que original)
+                # Convertir a formato usable
                 mse_grads_batch = tf.reduce_mean(
                     tf.sqrt(tf.reduce_sum(tf.square(mse_grads_batch)))
                 ).numpy()
@@ -177,7 +175,7 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
         with train_summary_writer.as_default():
             tf.summary.scalar('loss', train_mse, step=epoch)
 
-        # --- 3.7 Validacion sobre dataset COMPLETO  ---
+        # --- 3.7 Validacion sobre dataset completo ---
 
         # Preparar datos de validacion (reshape segun tipo de red)
         if denoise_network == 'fcNN':
@@ -195,7 +193,7 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
         with val_summary_writer.as_default():
             tf.summary.scalar('loss', val_mse, step=epoch)
 
-        # --- 3.8 Guardar mejor modelo  ---
+        # --- 3.8 Guardar mejor modelo ---
         if epoch > epochs * 0.8 and float(val_mse) < val_mse_min:
             print('yes,smaller ', float(val_mse), val_mse_min)
             val_mse_min = float(val_mse)
@@ -205,16 +203,16 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
             tf.keras.models.save_model(model, path)
             print('Best model has been saved')
 
-        # --- 3.9 Reporte de epoca  ---
+        # --- 3.9 Reporte de epoca ---
         print('Epoch #: {}/{}, Time taken: {} secs,\\n Grads: mse= {},\\n Losses: train_mse= {}, val_mse={}'
               .format(epoch + 1, epochs, time.time() - start, mse_grads_epoch, train_mse, val_mse))
 
-    # --- 3.10 Finalizar---
+    # --- 3.10 Finalizar ---
     try:
         from IPython.display import clear_output
         clear_output(wait=True)
     except ImportError:
-        pass
+        pass  # No es Jupyter, ignorar
 
     # Guardar historial en diccionario
     history['grads']['mse'] = mse_grads_history

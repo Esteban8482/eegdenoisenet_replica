@@ -4,7 +4,7 @@ import os
 import sys
 
 # ======================================================
-# 1. CONFIGURACION GPU
+# 1. CONFIGURACION GPU (preservada de version GPU)
 # ======================================================
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
@@ -36,6 +36,7 @@ from save_method import save_eeg
 # ======================================================
 # 3. PARAMETROS CONFIGURABLES
 # ======================================================
+# NOTA: Estos valores deben coincidir EXACTAMENTE con el paper:
 # - FCNN: 60 epochs (EOG), 60 epochs (EMG)
 # - Simple/Complex CNN: 40 epochs (EOG), 10 epochs (EMG)
 # - RNN: 100 epochs (EOG), 60 epochs (EMG)
@@ -49,7 +50,7 @@ RESULT_DIR = './results'
 MODEL_NAME = 'fcNN'       # 'fcNN' | 'Simple_CNN' | 'Complex_CNN' | 'RNN_lstm'
 NOISE_TYPE = 'EOG'        # 'EOG' | 'EMG'
 
-# --- HIPERPARAMETROS ---
+# --- HIPERPARAMETROS (valores del paper) ---
 if MODEL_NAME == 'fcNN':
     EPOCHS = 60 if NOISE_TYPE == 'EOG' else 60
 elif MODEL_NAME in ['Simple_CNN', 'Complex_CNN']:
@@ -62,8 +63,9 @@ else:
 BATCH_SIZE = 40
 COMBIN_NUM = 10  # Factor de expansion del dataset (10 niveles SNR)
 
-# --- OPTIMIZADOR ---
-# Original: tf.optimizers.Adam(lr=0.00005, beta_1=0.5, beta_2=0.9, epsilon=1e-08)
+# --- OPTIMIZADOR---
+# tf.optimizers.Adam(lr=0.00005, beta_1=0.5, beta_2=0.9, epsilon=1e-08)
+# API moderna:
 optimizer = tf.keras.optimizers.Adam(
     learning_rate=0.00005,
     beta_1=0.5,
@@ -97,14 +99,14 @@ print(f"Dataset expansion: {COMBIN_NUM}x")
 print(f"{'='*60}\n")
 
 # ======================================================
-# 5. CARGA DE DATOS (numpy arrays, igual que original)
+# 5. CARGA DE DATOS
 # ======================================================
 EEG_all = np.load(os.path.join(DATA_DIR, EEG_FILE))
 noise_all = np.load(os.path.join(DATA_DIR, NOISE_FILE))
 print(f'[OK] EEG: {EEG_all.shape}, Ruido: {noise_all.shape}')
 
 # ======================================================
-# 6. PREPARACION DE DATOS (igual que original)
+# 6. PREPARACION DE DATOS
 # ======================================================
 (noiseEEG_train, EEG_train, noiseEEG_val, EEG_val,
  noiseEEG_test, EEG_test, test_std) = prepare_data(
@@ -154,7 +156,7 @@ print("\n" + "="*60)
 print("INICIANDO ENTRENAMIENTO (Version Hibrida)")
 print("="*60 + "\n")
 
-# Pasar numpy arrays (igual que el original)
+# Pasar numpy arrays
 # train() internamente crea tf.data.Dataset para eficiencia GPU
 saved_model, history = train(
     model=model,
