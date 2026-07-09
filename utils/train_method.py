@@ -197,7 +197,8 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
         if epoch > epochs * 0.8 and float(val_mse) < val_mse_min:
             print('yes,smaller ', float(val_mse), val_mse_min)
             val_mse_min = float(val_mse)
-            saved_model = model
+            saved_model = tf.keras.models.clone_model(model)
+            saved_model.set_weights(model.get_weights())
 
             path = os.path.join(result_location, foldername, train_num, "denoise_model")
             tf.keras.models.save_model(model, path)
