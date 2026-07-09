@@ -1,4 +1,3 @@
-import tensorflow as tf
 import numpy as np
 import os
 import sys
@@ -11,6 +10,9 @@ from datetime import datetime
 # 1. CONFIGURACION GPU
 # ======================================================
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+import tensorflow as tf
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 print(f"GPUs detectadas: {gpus}")

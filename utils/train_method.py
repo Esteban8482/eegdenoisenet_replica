@@ -13,52 +13,7 @@ from loss_function import (
 
 
 # ======================================================
-# 1. TRAIN_STEP VECTORIZADO MATEMATICAMENTE EQUIVALENTE
-# ======================================================
-@tf.function
-def train_step(model, noiseEEG_batch, EEG_batch, optimizer, denoise_network, datanum):
-    """
-    Paso de entrenamiento vectorizado.
-
-    Args:
-        model: Instancia del modelo Keras
-        noiseEEG_batch: Batch de EEG con ruido [batch_size, datanum]
-        EEG_batch: Batch de EEG limpio [batch_size, datanum]
-        optimizer: Optimizador de TensorFlow
-        denoise_network: String con el nombre del modelo ('fcNN', etc.)
-        datanum: Numero de puntos de muestra (512 o 1024)
-
-    Returns:
-        M_loss: Perdida promedio del batch (scalar tensor)
-        mse_grads[0]: Primer gradiente
-    """
-    # Reshape segun el tipo de red neuronal
-    if denoise_network == 'fcNN':
-        noiseEEG_batch_r = tf.reshape(noiseEEG_batch, [-1, datanum])
-    else:
-        noiseEEG_batch_r = tf.reshape(noiseEEG_batch, [-1, datanum, 1])
-
-    EEG_batch_r = tf.cast(tf.reshape(EEG_batch, [-1, datanum, 1]), tf.float32)
-
-    with tf.GradientTape() as loss_tape:
-        # Forward pass: batch completo en GPU
-        denoiseoutput = model(noiseEEG_batch_r, training=True)
-        denoiseoutput = tf.reshape(denoiseoutput, [-1, datanum, 1])
-
-        # Perdida MSE sobre el batch completo
-        # MSE(batch) == mean(MSE(muestra_i)) por linealidad del promedio
-        M_loss = denoise_loss_mse(denoiseoutput, EEG_batch_r)
-
-    # Backpropagation
-    mse_grads = loss_tape.gradient(M_loss, model.trainable_variables)
-    optimizer.apply_gradients(zip(mse_grads, model.trainable_variables))
-
-    # Retornar solo el primer gradiente
-    return M_loss, mse_grads[0]
-
-
-# ======================================================
-# 2. TEST_STEP SIN @tf.function 
+# 2. TEST_STEP SIN @tf.function
 # ======================================================
 def test_step(model, noiseEEG_test, EEG_test):
     """
@@ -153,7 +108,48 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
     dataset = dataset.batch(batch_size, drop_remainder=False)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
-    # --- 3.5 Bucle de entrenamiento ---
+    # --- 3.5 Construir optimizador fuera del grafo para evitar
+    #      que las variables de estado se creen dentro de tf.function ---
+    optimizer.build(model.trainable_variables)
+
+    # --- 3.6 Paso de entrenamiento local (closure sobre model/optimizer)
+    #      Cada llamada a train() crea su propio grafo, evitando que un
+    #      modelo u optimizador de una ejecucion anterior comparta el grafo.
+    @tf.function
+    def train_step(noiseEEG_batch, EEG_batch):
+        """
+        Paso de entrenamiento vectorizado.
+
+        Captura model, optimizer, denoise_network y datanum del closure
+        de train(). Esto asegura que cada ejecucion tenga su propio grafo
+        y evita el error de crear tf.Variables dentro de tf.function al
+        reutilizar un optimizador entre modelos distintos.
+        """
+        # Reshape segun el tipo de red neuronal
+        if denoise_network == 'fcNN':
+            noiseEEG_batch_r = tf.reshape(noiseEEG_batch, [-1, datanum])
+        else:
+            noiseEEG_batch_r = tf.reshape(noiseEEG_batch, [-1, datanum, 1])
+
+        EEG_batch_r = tf.cast(tf.reshape(EEG_batch, [-1, datanum, 1]), tf.float32)
+
+        with tf.GradientTape() as loss_tape:
+            # Forward pass: batch completo en GPU
+            denoiseoutput = model(noiseEEG_batch_r, training=True)
+            denoiseoutput = tf.reshape(denoiseoutput, [-1, datanum, 1])
+
+            # Perdida MSE sobre el batch completo
+            # MSE(batch) == mean(MSE(muestra_i)) por linealidad del promedio
+            M_loss = denoise_loss_mse(denoiseoutput, EEG_batch_r)
+
+        # Backpropagation
+        mse_grads = loss_tape.gradient(M_loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(mse_grads, model.trainable_variables))
+
+        # Retornar solo el primer gradiente
+        return M_loss, mse_grads[0]
+
+    # --- 3.7 Bucle de entrenamiento ---
     for epoch in range(epochs):
         start = time.time()
 
@@ -164,8 +160,7 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
             for noiseEEG_batch, EEG_batch in dataset:
                 # Train step (vectorizado pero equivalente)
                 mse_loss_batch, mse_grads_batch = train_step(
-                    model, noiseEEG_batch, EEG_batch,
-                    optimizer, denoise_network, datanum
+                    noiseEEG_batch, EEG_batch
                 )
 
                 # Convertir a formato usable
@@ -181,14 +176,14 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
                 pbar.update()
             pbar.close()
 
-        # --- 3.6 Guardar historial de entrenamiento ---
+        # --- 3.8 Guardar historial de entrenamiento ---
         mse_grads_history.append(mse_grads_epoch)
         train_mse_history.append(train_mse)
 
         with train_summary_writer.as_default():
             tf.summary.scalar('loss', train_mse, step=epoch)
 
-        # --- 3.7 Validacion sobre dataset completo ---
+        # --- 3.9 Validacion sobre dataset completo ---
 
         # Preparar datos de validacion (reshape segun tipo de red)
         EEG_val_r = tf.cast(EEG_val, tf.float32)
@@ -215,7 +210,7 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
             tf.summary.scalar('rrmse_espectral', val_rrmse_s, step=epoch)
             tf.summary.scalar('cc_pearson', val_cc, step=epoch)
 
-        # --- 3.8 Guardar mejor modelo ---
+        # --- 3.10 Guardar mejor modelo ---
         if epoch > epochs * 0.8 and float(val_mse) < val_mse_min:
             print('yes,smaller ', float(val_mse), val_mse_min)
             val_mse_min = float(val_mse)
@@ -226,13 +221,13 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
             tf.keras.models.save_model(model, path)
             print('Best model has been saved')
 
-        # --- 3.9 Reporte de epoca ---
+        # --- 3.11 Reporte de epoca ---
         print('Epoch #: {}/{}, Time taken: {} secs,\\n Grads: mse= {},\\n '
               'Losses: train_mse= {}, val_mse={}, val_rrmse_t={}, val_rrmse_s={}, val_cc={}'
               .format(epoch + 1, epochs, time.time() - start, mse_grads_epoch,
                       train_mse, val_mse, val_rrmse_t, val_rrmse_s, val_cc))
 
-    # --- 3.10 Finalizar ---
+    # --- 3.12 Finalizar ---
     try:
         from IPython.display import clear_output
         clear_output(wait=True)
