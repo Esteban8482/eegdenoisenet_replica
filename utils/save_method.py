@@ -86,7 +86,7 @@ def save_eeg(saved_model, result_location, foldername,
         noiseEEG_train_r, EEG_train_r = _reshape_for_model(
             noiseEEG_train, EEG_train, denoise_network, datanum
         )
-        Denoiseoutput_train, train_mse = test_step(
+        Denoiseoutput_train, train_metrics = test_step(
             saved_model, noiseEEG_train_r, EEG_train_r
         )
 
@@ -97,7 +97,10 @@ def save_eeg(saved_model, result_location, foldername,
         np.save(os.path.join(output_dir, "EEG_train.npy"),
                 to_numpy(EEG_train))
 
-        print(f"  [OK] Train MSE: {float(train_mse):.6f}")
+        print(f"  [OK] Train MSE: {float(train_metrics['mse']):.6f}, "
+              f"RRMSE_t: {float(train_metrics['rrmse_t']):.6f}, "
+              f"RRMSE_s: {float(train_metrics['rrmse_s']):.6f}, "
+              f"CC: {float(train_metrics['cc']):.6f}")
 
     # --- Guardar datos de validacion ---
     if save_vali:
@@ -106,7 +109,7 @@ def save_eeg(saved_model, result_location, foldername,
         noiseEEG_val_r, EEG_val_r = _reshape_for_model(
             noiseEEG_val, EEG_val, denoise_network, datanum
         )
-        Denoiseoutput_val, val_mse = test_step(
+        Denoiseoutput_val, val_metrics = test_step(
             saved_model, noiseEEG_val_r, EEG_val_r
         )
 
@@ -117,7 +120,10 @@ def save_eeg(saved_model, result_location, foldername,
         np.save(os.path.join(output_dir, "EEG_val.npy"),
                 to_numpy(EEG_val))
 
-        print(f"  [OK] Val MSE: {float(val_mse):.6f}")
+        print(f"  [OK] Val MSE: {float(val_metrics['mse']):.6f}, "
+              f"RRMSE_t: {float(val_metrics['rrmse_t']):.6f}, "
+              f"RRMSE_s: {float(val_metrics['rrmse_s']):.6f}, "
+              f"CC: {float(val_metrics['cc']):.6f}")
 
     # --- Guardar datos de test ---
     if save_test:
@@ -126,7 +132,7 @@ def save_eeg(saved_model, result_location, foldername,
         noiseEEG_test_r, EEG_test_r = _reshape_for_model(
             noiseEEG_test, EEG_test, denoise_network, datanum
         )
-        Denoiseoutput_test, test_mse = test_step(
+        Denoiseoutput_test, test_metrics = test_step(
             saved_model, noiseEEG_test_r, EEG_test_r
         )
 
@@ -137,6 +143,9 @@ def save_eeg(saved_model, result_location, foldername,
         np.save(os.path.join(output_dir, "EEG_test.npy"),
                 to_numpy(EEG_test))
 
-        print(f"  [OK] Test MSE: {float(test_mse):.6f}")
+        print(f"  [OK] Test MSE: {float(test_metrics['mse']):.6f}, "
+              f"RRMSE_t: {float(test_metrics['rrmse_t']):.6f}, "
+              f"RRMSE_s: {float(test_metrics['rrmse_s']):.6f}, "
+              f"CC: {float(test_metrics['cc']):.6f}")
 
     print(f"[OK] Archivos guardados en: {output_dir}")

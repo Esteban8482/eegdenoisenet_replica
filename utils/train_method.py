@@ -4,7 +4,12 @@ from tqdm import tqdm
 import os
 import math
 
-from loss_function import denoise_loss_mse
+from loss_function import (
+    denoise_loss_mse,
+    denoise_loss_rrmset,
+    denoise_loss_rrmses,
+    denoise_loss_pearson,
+)
 
 
 # ======================================================
@@ -66,12 +71,18 @@ def test_step(model, noiseEEG_test, EEG_test):
 
     Returns:
         denoiseoutput_test: Senal denoised
-        loss: Valor de perdida MSE
+        metrics: Diccionario con MSE, RRMSE temporal, RRMSE espectral
+                 y CC de Pearson
     """
     denoiseoutput_test = model(noiseEEG_test, training=False)
-    loss = denoise_loss_mse(EEG_test, denoiseoutput_test)
+    metrics = {
+        'mse': denoise_loss_mse(EEG_test, denoiseoutput_test),
+        'rrmse_t': denoise_loss_rrmset(denoiseoutput_test, EEG_test),
+        'rrmse_s': denoise_loss_rrmses(denoiseoutput_test, EEG_test),
+        'cc': denoise_loss_pearson(denoiseoutput_test, EEG_test),
+    }
 
-    return denoiseoutput_test, loss
+    return denoiseoutput_test, metrics
 
 
 # ======================================================
@@ -115,8 +126,9 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
     history = {}
     history['grads'], history['loss'] = {}, {}
     train_mse_history, val_mse_history = [], []
+    val_rrmse_t_history, val_rrmse_s_history, val_cc_history = [], [], []
     mse_grads_history = []
-    val_mse_min = 100.0  # cualquier numero mayor que 1 
+    val_mse_min = 100.0  # cualquier numero mayor que 1
     saved_model = None
     datanum = noiseEEG.shape[1]
 
@@ -179,19 +191,29 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
         # --- 3.7 Validacion sobre dataset completo ---
 
         # Preparar datos de validacion (reshape segun tipo de red)
+        EEG_val_r = tf.cast(EEG_val, tf.float32)
         if denoise_network == 'fcNN':
             noiseEEG_val_r = tf.cast(noiseEEG_val, tf.float32)
         else:
             noiseEEG_val_r = tf.cast(tf.reshape(noiseEEG_val, [-1, datanum, 1]), tf.float32)
-            EEG_val_r = tf.cast(EEG_val, tf.float32)
 
-        denoiseoutput, val_mse = test_step(model, noiseEEG_val_r, EEG_val_r)
+        denoiseoutput, val_metrics = test_step(model, noiseEEG_val_r, EEG_val_r)
+        val_mse = val_metrics['mse']
+        val_rrmse_t = val_metrics['rrmse_t']
+        val_rrmse_s = val_metrics['rrmse_s']
+        val_cc = val_metrics['cc']
 
         # Guardar historial de validacion
         val_mse_history.append(val_mse)
+        val_rrmse_t_history.append(val_rrmse_t)
+        val_rrmse_s_history.append(val_rrmse_s)
+        val_cc_history.append(val_cc)
 
         with val_summary_writer.as_default():
             tf.summary.scalar('loss', val_mse, step=epoch)
+            tf.summary.scalar('rrmse_temporal', val_rrmse_t, step=epoch)
+            tf.summary.scalar('rrmse_espectral', val_rrmse_s, step=epoch)
+            tf.summary.scalar('cc_pearson', val_cc, step=epoch)
 
         # --- 3.8 Guardar mejor modelo ---
         if epoch > epochs * 0.8 and float(val_mse) < val_mse_min:
@@ -205,8 +227,10 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
             print('Best model has been saved')
 
         # --- 3.9 Reporte de epoca ---
-        print('Epoch #: {}/{}, Time taken: {} secs,\\n Grads: mse= {},\\n Losses: train_mse= {}, val_mse={}'
-              .format(epoch + 1, epochs, time.time() - start, mse_grads_epoch, train_mse, val_mse))
+        print('Epoch #: {}/{}, Time taken: {} secs,\\n Grads: mse= {},\\n '
+              'Losses: train_mse= {}, val_mse={}, val_rrmse_t={}, val_rrmse_s={}, val_cc={}'
+              .format(epoch + 1, epochs, time.time() - start, mse_grads_epoch,
+                      train_mse, val_mse, val_rrmse_t, val_rrmse_s, val_cc))
 
     # --- 3.10 Finalizar ---
     try:
@@ -219,5 +243,8 @@ def train(model, noiseEEG, EEG, noiseEEG_val, EEG_val,
     history['grads']['mse'] = mse_grads_history
     history['loss']['train_mse'] = train_mse_history
     history['loss']['val_mse'] = val_mse_history
+    history['loss']['val_rrmse_t'] = val_rrmse_t_history
+    history['loss']['val_rrmse_s'] = val_rrmse_s_history
+    history['loss']['val_cc'] = val_cc_history
 
     return saved_model, history
