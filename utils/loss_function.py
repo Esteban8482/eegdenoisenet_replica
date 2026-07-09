@@ -59,19 +59,3 @@ def denoise_loss_rrmset(denoise, clean):
     rmse2 = denoise_loss_rmse(clean, tf.zeros_like(clean))
     return rmse1 / rmse2
 
-
-def denoise_loss_rrmset2(denoise, clean):
-    """
-    Calcula el RMSE relativo (RRMSE) espectral.
-    Version alternativa usada en algunas evaluaciones.
-
-    Args:
-        denoise: Tensor con la senal denoised
-        clean: Tensor con la senal EEG limpia
-
-    Returns:
-        Scalar tensor con el valor de RRMSE espectral
-    """
-    rmse1 = denoise_loss_rmse(denoise, clean)
-    rmse2 = denoise_loss_rmse(clean, tf.zeros_like(clean))
-    return rmse1 / rmse2
