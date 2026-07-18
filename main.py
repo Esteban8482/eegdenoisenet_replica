@@ -57,12 +57,12 @@ EPOCHS_CONFIG = {
 
 BATCH_SIZE = 40
 COMBIN_NUM = 10  # Factor de expansion del dataset (10 niveles SNR)
-DATA_DIR = './data'
-RESULT_DIR = './results'
 
-# ======================================================
-# 4. FUNCIONES AUXILIARES
-# ======================================================
+# ----------------------------------------------------------------------
+# RUTAS DE ALMACENAMIENTO
+# ----------------------------------------------------------------------
+DATA_DIR = os.path.abspath(os.environ.get('EEG_DATA_DIR', './data'))
+RESULT_DIR = os.path.abspath(os.environ.get('EEG_RESULT_DIR', './results'))
 
 def get_data_files(noise_type):
     """
@@ -376,6 +376,8 @@ def main():
     print(f"Modelos: {MODELS}")
     print(f"Tipos de ruido: {NOISE_TYPES}")
     print(f"Repeticiones: {REPETITIONS}")
+    print(f"DATA_DIR   = {DATA_DIR}")
+    print(f"RESULT_DIR = {RESULT_DIR}")
     print("="*60 + "\n")
 
     orchestration_start = time.time()
